@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Bot WhatsApp</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard">
+        <header>
+            <h1>🤖 Dashboard Bot WhatsApp</h1>
+            <div id="status" class="status disconnected">
+                🔴 Desconectado
+            </div>
+        </header>
+
+        <main>
+            <!-- QR Code Section -->
+            <section class="card">
+                <h2>📱 Conexão WhatsApp</h2>
+                <div id="qrcode-container">
+                    <div id="qrcode"></div>
+                    <p id="qrcode-message">Carregando QR Code...</p>
+                </div>
+                <div id="connection-status"></div>
+            </section>
+
+            <!-- Status Info -->
+            <section class="card">
+                <h2>📊 Informações do Sistema</h2>
+                <div id="system-info">
+                    <p><strong>Fuso Horário:</strong> <span id="timezone">Africa/Maputo</span></p>
+                    <p><strong>Hora Atual:</strong> <span id="current-time">Carregando...</span></p>
+                    <p><strong>Prompts Ativos:</strong> <span id="prompts-count">0</span></p>
+                </div>
+            </section>
+
+            <!-- Gerenciar Prompts -->
+            <section class="card">
+                <h2>⏰ Agendar Prompts</h2>
+                <form id="prompt-form">
+                    <div class="input-group">
+                        <label for="hora">Horário (HH:MM):</label>
+                        <input type="time" id="hora" required>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="acao">Ação:</label>
+                        <textarea id="acao" placeholder="Ex: Envie mensagem de boa noite e desative o chat" required></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn">Agendar Prompt</button>
+                </form>
+            </section>
+
+            <!-- Lista de Prompts -->
+            <section class="card">
+                <h2>📋 Prompts Agendados</h2>
+                <div id="prompts-list">
+                    <p>Carregando...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Atualizar status da conexão
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                document.getElementById('timezone').textContent = data.timezone;
+                document.getElementById('current-time').textContent = data.currentTime;
+                document.getElementById('prompts-count').textContent = data.memorySize;
+                
+                const statusDiv = document.getElementById('status');
+                if (data.connected) {
+                    statusDiv.textContent = '✅ Conectado';
+                    statusDiv.className = 'status connected';
+                    document.getElementById('qrcode-container').style.display = 'none';
+                } else {
+                    statusDiv.textContent = '🔴 Desconectado';
+                    statusDiv.className = 'status disconnected';
+                    document.getElementById('qrcode-container').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Erro ao atualizar status:', error);
+            }
+        }
+
+        // Carregar QR Code
+        async function loadQRCode() {
+            try {
+                const response = await fetch('/qrcode');
+                const data = await response.json();
+                
+                if (data.connected) {
+                    document.getElementById('qrcode-container').innerHTML = 
+                        '<p>✅ WhatsApp conectado!</p>';
+                } else if (data.qr) {
+                    document.getElementById('qrcode').innerHTML = 
+                        `<img src="${data.qr}" alt="QR Code">`;
+                    document.getElementById('qrcode-message').textContent = 
+                        'Escaneie este QR Code com seu WhatsApp';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar QR Code:', error);
+            }
+        }
+
+        // Carregar prompts
+        async function loadPrompts() {
+            try {
+                const response = await fetch('/prompts');
+                const prompts = await response.json();
+                
+                const promptsList = document.getElementById('prompts-list');
+                
+                if (Object.keys(prompts).length === 0) {
+                    promptsList.innerHTML = '<p>Nenhum prompt agendado</p>';
+                    return;
+                }
+                
+                let html = '';
+                for (const [hora, acoes] of Object.entries(prompts)) {
+                    html += `<div class="prompt-item">
+                        <strong>🕒 ${hora}</strong>`;
+                    
+                    acoes.forEach((acao, index) => {
+                        html += `<div class="prompt-action">
+                            <span>${acao.acao}</span>
+                            <button onclick="deletePrompt('${hora}', ${index})">🗑️</button>
+                        </div>`;
+                    });
+                    
+                    html += '</div>';
+                }
+                
+                promptsList.innerHTML = html;
+            } catch (error) {
+                console.error('Erro ao carregar prompts:', error);
+            }
+        }
+
+        // Deletar prompt
+        async function deletePrompt(hora, index) {
+            if (confirm('Tem certeza que deseja deletar este prompt?')) {
+                try {
+                    const response = await fetch(`/prompt/${hora}/${index}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        loadPrompts();
+                        updateStatus();
+                    }
+                } catch (error) {
+                    console.error('Erro ao deletar prompt:', error);
+                }
+            }
+        }
+
+        // Formulário de prompt
+        document.getElementById('prompt-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const hora = document.getElementById('hora').value;
+            const acao = document.getElementById('acao').value;
+            
+            try {
+                const response = await fetch('/prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tipo: 'horario', hora, acao })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Prompt agendado com sucesso!');
+                    document.getElementById('prompt-form').reset();
+                    loadPrompts();
+                    updateStatus();
+                } else {
+                    alert('Erro ao agendar prompt');
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro de conexão');
+            }
+        });
+
+        // Atualizações automáticas
+        setInterval(updateStatus, 5000);
+        setInterval(loadQRCode, 10000);
+        setInterval(loadPrompts, 15000);
+
+        // Carregar inicial
+        updateStatus();
+        loadQRCode();
+        loadPrompts();
+    </script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Bot WhatsApp</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>🤖 Bot WhatsApp</h1>
+            <p class="subtitle">Acesso Restrito - Moçambique</p>
+            
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="senha">Senha:</label>
+                    <input type="password" id="senha" required>
+                </div>
+                
+                <button type="submit" class="btn">Entrar</button>
+            </form>
+            
+            <div id="message" class="message"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const senha = document.getElementById('senha').value;
+            const messageDiv = document.getElementById('message');
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ senha })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    messageDiv.textContent = data.error;
+                    messageDiv.className = 'message error';
+                }
+            } catch (error) {
+                messageDiv.textContent = 'Erro de conexão';
+                messageDiv.className = 'message error';
+            }
+        });
+    </script>
+</body>
+</html>
