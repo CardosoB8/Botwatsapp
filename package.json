@@ -1,35 +1,32 @@
 {
   "name": "bot-whatsapp-completo",
   "version": "1.0.0",
-  "description": "Bot WhatsApp com Redis, Gemini AI e Admin de Grupos",
+  "description": "Bot WhatsApp com Dashboard, Redis e Gemini AI",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
   "keywords": [
     "whatsapp",
     "bot",
     "gemini",
-    "redis",
-    "vercel",
-    "render"
+    "redis"
   ],
-  "author": "",
+  "author": "Seu Nome",
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.1.0",
+    "chrome-aws-lambda": "^10.1.0",
+    "cookie-parser": "^1.4.6",
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
-    "node-cron": "^3.0.3",
+    "moment-timezone": "^0.5.45",
+    "node-schedule": "^2.1.1",
     "qrcode-terminal": "^0.12.0",
-    "redis": "^4.6.13",
-    "whatsapp-web.js": "^1.23.0",
-    "puppeteer-core": "^22.0.0",
-    "chrome-aws-lambda": "^10.0.0"
+    "redis": "^4.6.14",
+    "whatsapp-web.js": "^1.23.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0",
-    "puppeteer": "^22.0.0"
+    "nodemon": "^3.1.0"
   }
 }
