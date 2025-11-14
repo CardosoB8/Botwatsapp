@@ -4,11 +4,11 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const path = require('path');
-const chrome = require('chrome-aws-lambda');
+// const chrome = require('chrome-aws-lambda'); // <-- REMOVIDO para estabilidade no Render
 const cookieParser = require('cookie-parser');
 const moment = require('moment-timezone');
 
-// Importações do Projeto (CORREÇÃO: Importa a instância única da classe)
+// Importações do Projeto (Importa a instância única da classe)
 const config = require('./config');
 const redisClient = require('./redis-client'); 
 const commandHandler = require('./handlers/command-handler'); 
@@ -24,6 +24,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
+// Configurações para servir arquivos estáticos (public/)
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 // --- MIDDLEWARE DE AUTENTICAÇÃO ---
@@ -33,14 +34,20 @@ function isAuthenticated(req, res, next) {
     if (req.cookies.token === AUTH_TOKEN) {
         return next();
     }
+    // Redireciona para o login se a rota for protegida
     if (req.originalUrl === '/dashboard') {
         return res.redirect('/login');
     }
+    // Para chamadas de API
     return res.status(401).json({ success: false, error: 'Acesso negado. Faça login.' });
 }
 
 // --- ROTAS DO PAINEL ---
-app.get('/', (req, res) => res.redirect('/login'));
+
+app.get('/', (req, res) => {
+    // Redireciona a raiz para a página inicial (index.html) ou login
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.get('/login', (req, res) => {
     if (req.cookies.token === AUTH_TOKEN) {
@@ -62,7 +69,13 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
-// --- ROTAS DE API ---
+app.get('/logout', (req, res) => {
+    res.clearCookie('token');
+    res.redirect('/login');
+});
+
+
+// --- ROTAS DE API (PROTEGIDAS) ---
 
 // 1. Rota de Status
 app.get('/status', isAuthenticated, async (req, res) => {
@@ -74,7 +87,6 @@ app.get('/status', isAuthenticated, async (req, res) => {
         status: clientStatus,
         timezone: config.TIMEZONE,
         currentTime: moment().tz(config.TIMEZONE).format('HH:mm:ss'),
-        // Verifica a saúde usando o método da classe
         redisConnected: await redisClient.healthCheck(), 
         promptsCount: promptsCount,
     });
@@ -92,7 +104,6 @@ app.get('/qrcode', isAuthenticated, (req, res) => {
 
 // 3. Rota de Prompts Agendados (GET)
 app.get('/prompts', isAuthenticated, async (req, res) => {
-    // Usa o método da classe para obter o Hash formatado
     const prompts = await redisClient.getAllScheduledPrompts();
     res.json(prompts);
 });
@@ -108,7 +119,6 @@ app.post('/prompt', isAuthenticated, async (req, res) => {
         const prompts = await redisClient.getAllScheduledPrompts();
         const currentPrompts = prompts[key] || [];
         
-        // Adiciona o novo prompt
         currentPrompts.push({ id: Date.now(), acao: acao.trim() });
         
         await redisClient.updateScheduledPrompt(key, currentPrompts);
@@ -156,25 +166,30 @@ app.listen(config.PORT, () => {
 });
 
 async function startBot() {
-    // CORREÇÃO: Chama o método 'connect' na instância da classe
+    // 1. Conecta o Redis primeiro
     const isRedisConnected = await redisClient.connect(); 
     
-    // ... (restante do código do Cliente WhatsApp e eventos)
-
+    // 2. Configuração do Cliente WhatsApp
     client = new Client({
         authStrategy: new LocalAuth({ clientId: "bot-session" }),
         puppeteer: {
-            executablePath: await chrome.executablePath,
-            args: [...chrome.args, '--no-sandbox', '--disable-setuid-sandbox'],
+            // CORREÇÃO CRÍTICA PARA O RENDER: Apenas flags de sandbox
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
             headless: true,
         },
         qrTimeoutMs: 60000, 
     });
 
+    // 3. Eventos do Cliente
     client.on('qr', (qr) => {
         qrCodeValue = qr;
         clientStatus = 'AGUARDANDO QR CODE';
         qrcode.generate(qr, { small: true }); 
+    });
+
+    client.on('authenticated', () => {
+        clientStatus = 'AUTENTICADO';
+        qrCodeValue = null;
     });
 
     client.on('ready', () => {
@@ -195,6 +210,7 @@ async function startBot() {
         await commandHandler(client, msg, redisClient); 
     });
 
+    // 4. Inicializa o Cliente
     try {
         await client.initialize();
     } catch (error) {
