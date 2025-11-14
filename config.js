@@ -1,15 +1,26 @@
-// config.js (Ajustado)
+// config.js
 
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
 
 module.exports = {
-    DONO: process.env.DONO,
-    WEB_SENHA: process.env.WEB_SENHA,
+    // Variáveis de Ambiente
+    OWNER_JID: process.env.DONO || '258865446574@c.us',
+    WEB_PASSWORD: process.env.WEB_SENHA || 'admin123',
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    
+    // Configurações Redis (Estrutura aninhada exigida pela classe)
     REDIS: {
-        PASSWORD: process.env.REDIS_PASSWORD,
-        HOST: process.env.REDIS_HOST || 'localhost', // Fallback para localhost
-        PORT: process.env.REDIS_PORT || 6379,     // Fallback para 6379
-        PREFIX: 'whatsapp-bot:' // Novo prefixo para todas as chaves
-    }
+        HOST: process.env.REDIS_HOST || 'localhost',
+        PORT: process.env.REDIS_PORT || 6379,
+        PASSWORD: process.env.REDIS_PASSWORD, // Use REDIS_PASSWORD no .env
+        PREFIX: 'bot:', // Prefixo para chaves no Redis
+    },
+
+    // Configurações Gerais
+    TIMEZONE: 'Africa/Maputo',
+    BOT_NAME: 'Bot WhatsApp Gemini AI',
+    PORT: process.env.PORT || 10000,
+    PREFIX: '!',
+    MAX_MESSAGES_TO_CLEAR: 1000,
 };

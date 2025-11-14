@@ -1,4 +1,4 @@
-// redis-client.js (Ajustado com Funções de Agendamento)
+// redis-client.js (Com Funções Hash para Agendamento)
 
 const { createClient } = require('redis');
 const config = require('./config');
@@ -6,8 +6,7 @@ const config = require('./config');
 class RedisClient {
     constructor() {
         this.client = null;
-        // O prefixo foi movido para o config.js
-        this.prefix = config.REDIS.PREFIX; 
+        this.prefix = config.REDIS.PREFIX;
         
         this.redisConfig = {
             username: 'default',
@@ -15,13 +14,9 @@ class RedisClient {
             socket: {
                 host: config.REDIS.HOST,
                 port: config.REDIS.PORT,
-                // tls: { 
-                //     rejectUnauthorized: false // Usado para conexões seguras/cloud
-                // }
             }
         };
         
-        // Se a senha não estiver configurada, remove username/password
         if (!config.REDIS.PASSWORD) {
             delete this.redisConfig.username;
             delete this.redisConfig.password;
@@ -35,8 +30,13 @@ class RedisClient {
         }
         
         try {
-            this.client = createClient(this.redisConfig);
-            
+            // Se houver REDIS_URL no ambiente, prioriza a URL
+            if (process.env.REDIS_URL) {
+                this.client = createClient({ url: process.env.REDIS_URL });
+            } else {
+                this.client = createClient(this.redisConfig);
+            }
+
             this.client.on('error', (err) => console.error('❌ Redis Client Error:', err));
             this.client.on('connect', () => console.log('🟡 Conectando ao Redis...'));
             this.client.on('ready', () => console.log('✅ Conectado ao Redis com sucesso!'));
@@ -48,65 +48,56 @@ class RedisClient {
             return false;
         }
     }
-
-    // --- Funções Básicas ---
     
-    async set(key, value) {
-        if (!this.client || !this.client.isOpen) return null;
-        try {
-            const fullKey = `${this.prefix}${key}`;
-            // Armazenamos sempre como string JSON, como na sua implementação
-            return await this.client.set(fullKey, JSON.stringify(value));
-        } catch (error) {
-            console.error('Erro Redis set:', error);
-            return null;
-        }
-    }
+    // --- Funções para Agendamento (Usando HASH para o Scheduler) ---
 
-    async get(key) {
-        if (!this.client || !this.client.isOpen) return null;
-        try {
-            const fullKey = `${this.prefix}${key}`;
-            const data = await this.client.get(fullKey);
-            // Retorna o objeto desserializado
-            return data ? JSON.parse(data) : null;
-        } catch (error) {
-            console.error('Erro Redis get:', error);
-            return null;
-        }
-    }
-    
-    // --- Funções para Agendamento (Lista) ---
-
-    async addScheduledPrompt(promptData) {
-        if (!this.client || !this.client.isOpen) return null;
+    // Obtém todos os prompts agendados, agrupados por tempo
+    async getAllScheduledPrompts() {
+        if (!this.client || !this.client.isOpen) return {};
         try {
             const fullKey = `${this.prefix}scheduled_prompts`;
-            const data = JSON.stringify(promptData);
-            // Adiciona ao início da lista
-            await this.client.lPush(fullKey, data); 
+            // hGetAll retorna o Hash inteiro
+            const promptsData = await this.client.hGetAll(fullKey); 
+            
+            // Desserializa todos os valores JSON
+            const formattedPrompts = {};
+            for (const hora in promptsData) {
+                formattedPrompts[hora] = JSON.parse(promptsData[hora]);
+            }
+            return formattedPrompts;
         } catch (error) {
-            console.error('Erro Redis lPush (addScheduledPrompt):', error);
+            console.error('Erro Redis getAllScheduledPrompts:', error);
+            return {};
         }
     }
 
-    async getScheduledPrompts() {
-        if (!this.client || !this.client.isOpen) return [];
+    // Adiciona/Atualiza um prompt agendado (requer HH:MM e lista de prompts)
+    async updateScheduledPrompt(hora, promptsList) {
+        if (!this.client || !this.client.isOpen) return false;
         try {
             const fullKey = `${this.prefix}scheduled_prompts`;
-            // Pega todos os elementos da lista
-            const list = await this.client.lRange(fullKey, 0, -1); 
-            // Faz o parse de cada item
-            return list.map(item => JSON.parse(item));
+            const data = JSON.stringify(promptsList);
+            await this.client.hSet(fullKey, hora, data); // hSet armazena o JSON
+            return true;
         } catch (error) {
-            console.error('Erro Redis lRange (getScheduledPrompts):', error);
-            return [];
+            console.error('Erro Redis updateScheduledPrompt:', error);
+            return false;
         }
     }
     
-    // Você pode adicionar uma função para remover prompts da lista, se necessário:
-    // async removeScheduledPrompt(promptData) { ... }
-    
+    // Remove um prompt agendado por hora (remove o campo do Hash)
+    async removeScheduledPrompt(hora) {
+        if (!this.client || !this.client.isOpen) return false;
+        try {
+            const fullKey = `${this.prefix}scheduled_prompts`;
+            await this.client.hDel(fullKey, hora);
+            return true;
+        } catch (error) {
+            console.error('Erro Redis removeScheduledPrompt:', error);
+            return false;
+        }
+    }
+
     async healthCheck() {
         if (!this.client || !this.client.isOpen) return false;
         try {
@@ -116,19 +107,7 @@ class RedisClient {
             return false;
         }
     }
-    
-    // Função de exclusão (mantida do seu original)
-    async delete(key) {
-        if (!this.client || !this.client.isOpen) return null;
-        try {
-            const fullKey = `${this.prefix}${key}`;
-            return await this.client.del(fullKey);
-        } catch (error) {
-            console.error('Erro Redis delete:', error);
-            return null;
-        }
-    }
 }
 
-// Exporta uma única instância da classe para ser usada em todo o projeto
+// Exporta uma única instância da classe (CORRETO)
 module.exports = new RedisClient();
