@@ -1,27 +1,26 @@
 {
-  "name": "bot-whatsapp-mocambique",
+  "name": "bot-whatsapp-completo",
   "version": "1.0.0",
-  "description": "Bot WhatsApp avançado com Gemini AI para Moçambique",
+  "description": "Bot WhatsApp completo com Redis e todas as funcionalidades",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "install-deps": "npm install whatsapp-web.js qrcode express express-session @google/generative-ai"
+    "vercel-build": "echo 'Build completo'"
   },
-  "keywords": ["whatsapp", "bot", "gemini-ai", "moçambique"],
-  "author": "Seu Nome",
-  "license": "MIT",
   "dependencies": {
     "whatsapp-web.js": "^1.23.0",
     "qrcode": "^1.5.3",
     "express": "^4.18.2",
     "express-session": "^1.17.3",
+    "redis": "^4.6.7",
+    "connect-redis": "^7.1.0",
     "@google/generative-ai": "^0.8.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=18.0.0"
   }
 }
