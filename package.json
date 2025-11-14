@@ -12,7 +12,8 @@
     "bot",
     "gemini",
     "redis",
-    "vercel"
+    "vercel",
+    "render"
   ],
   "author": "",
   "license": "ISC",
@@ -23,12 +24,12 @@
     "node-cron": "^3.0.3",
     "qrcode-terminal": "^0.12.0",
     "redis": "^4.6.13",
-    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#webpack-fixed",
+    "whatsapp-web.js": "^1.23.0", <-- CORREÇÃO APLICADA AQUI!
     "puppeteer-core": "^22.0.0",
     "chrome-aws-lambda": "^10.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",
-    "puppeteer": "^22.0.0" 
+    "puppeteer": "^22.0.0"
   }
 }
