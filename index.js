@@ -3,6 +3,10 @@
 const express = require('express');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
+
+// Dependências Serverless/Vercel
+const chromeAwsLambda = require('chrome-aws-lambda');
+
 // Importa a instância única da classe RedisClient
 const RedisClient = require('./redis-client'); 
 const { moderarConteudo, gerarResposta } = require('./gemini-ai');
@@ -21,36 +25,44 @@ app.use(express.json());
 app.use(express.static('public')); // Serve a interface web
 app.use(express.urlencoded({ extended: true }));
 
-// Conecta ao Redis usando a instância da classe
+// Conecta ao Redis
 RedisClient.connect().then(() => {
     console.log('✅ Sistema de persistência Redis pronto.');
 }).catch(err => {
     console.error('❌ Falha crítica ao conectar ao Redis:', err);
 });
 
-// --- 2. Inicialização do Cliente WhatsApp ---
+// --- 2. Inicialização do Cliente WhatsApp (AJUSTADO PARA VERCEL) ---
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: "bot-gemini-redis" }),
+    // Configuração para ambientes Serverless (Vercel/Lambda)
     puppeteer: {
+        executablePath: process.env.NODE_ENV === 'production' 
+            ? chromeAwsLambda.executablePath 
+            : undefined, // undefined permite o puppeteer local funcionar em dev
+        
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--no-zygote',
+            '--single-process'
+        ],
     }
 });
 
 client.on('qr', (qr) => {
     console.log('QR Code Recebido. Escaneie:', qr);
     qrcode.generate(qr, { small: true });
-    // Usa a função set da instância do RedisClient
     RedisClient.set('qrCode', qr); 
 });
 
 client.on('ready', () => {
     console.log('🎉 Cliente WhatsApp pronto e conectado!');
-    // Limpa o QR code e define o status
     RedisClient.set('qrCode', null);
     RedisClient.set('status', 'online');
-    
-    // Inicia o agendador de prompts
     iniciarAgendador(client); 
 });
 
@@ -71,7 +83,6 @@ client.on('message', async (msg) => {
     const isGroup = chat.isGroup;
     const messageBody = msg.body;
 
-    // Se a mensagem estiver vazia por algum motivo, ignora
     if (!messageBody) return;
 
     // 🛡️ 3.1. Moderação Inteligente com Gemini AI (Apenas em grupos)
@@ -81,13 +92,11 @@ client.on('message', async (msg) => {
         if (isInadequado) {
             console.log(`⚠️ Conteúdo inadequado em: ${chat.name}. Removendo.`);
             try {
-                // Tenta deletar a mensagem (Requer que o bot seja Admin)
                 await msg.delete(true); 
                 chat.sendMessage(`🚨 Alerta: Conteúdo moderado e removido. Por favor, siga as regras.`);
                 return;
             } catch (error) {
                 console.error("Erro ao deletar mensagem. O bot é admin?", error.message);
-                // Continua para evitar travar o bot, mas a mensagem fica.
             }
         }
     }
@@ -106,7 +115,6 @@ client.on('message', async (msg) => {
     if (!isGroup || (isGroup && msg.mentionedIds.includes(client.info.wid._serialized))) {
         
         const botId = client.info.wid.user;
-        // Remove a menção do bot para ter um prompt limpo
         const prompt = isGroup ? messageBody.replace(new RegExp(`@${botId}`), '').trim() : messageBody;
 
         if (prompt && prompt.length > 3) {
@@ -120,10 +128,8 @@ client.on('message', async (msg) => {
 
 
 // --- 4. Rotas da Interface Web (Dashboard) ---
-// Função de verificação de autenticação (simplificada)
 const checkAuth = (req, res, next) => {
     const token = req.headers['authorization'];
-    // Na produção, você verificaria um token JWT, aqui usamos a senha como token simplificado
     if (token === `Bearer ${WEB_SENHA}`) { 
         next();
     } else {
@@ -134,7 +140,6 @@ const checkAuth = (req, res, next) => {
 app.post('/login', (req, res) => {
     const { password } = req.body;
     if (password === WEB_SENHA) {
-        // Retorna a senha como token temporário para simular a autenticação
         res.status(200).json({ success: true, token: WEB_SENHA }); 
     } else {
         res.status(401).json({ success: false, message: 'Senha incorreta.' });
@@ -142,7 +147,6 @@ app.post('/login', (req, res) => {
 });
 
 app.get('/status', checkAuth, async (req, res) => {
-    // Busca informações no Redis e do Cliente
     const qrCode = await RedisClient.get('qrCode');
     const status = await RedisClient.get('status') || (client.info ? 'online' : 'offline');
     const scheduledPrompts = await RedisClient.getScheduledPrompts();
