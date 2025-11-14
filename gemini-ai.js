@@ -1,59 +1,50 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+// gemini-ai.js
 
-class GeminiAI {
-    constructor(apiKey) {
-        this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
-    }
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GEMINI_API_KEY } = require('./config'); 
 
-    async analisarMensagem(mensagem, contexto = '') {
-        try {
-            const prompt = `
-Analise esta mensagem de WhatsApp para moderação:
+if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY não configurada no arquivo .env");
+}
 
-MENSAGEM: "${mensagem}"
-CONTEXTO: ${contexto}
+const ai = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = "gemini-2.5-flash"; // Modelo rápido e eficiente
 
-Responda APENAS com JSON:
-{
-    "acao": "PERMITIR|ADVERTIR|REMOVER|RESPONDER",
-    "motivo": "explicação breve",
-    "resposta_opcional": "resposta ou null",
-    "nivel_gravidade": 1-10
-}`;
+async function moderarConteudo(text) {
+    const systemInstruction = `Você é um moderador de grupo de WhatsApp. Verifique se a mensagem contém conteúdo inadequado, como: spam, discurso de ódio, assédio, violência ou links suspeitos. Responda APENAS com "INADEQUADO" se a mensagem for inadequada, ou "OK" se for segura. Não use pontuação nem explique.`;
 
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
-            
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            return jsonMatch ? JSON.parse(jsonMatch[0]) : 
-                { acao: "PERMITIR", motivo: "Análise falhou", nivel_gravidade: 1 };
-                
-        } catch (error) {
-            console.error('Erro Gemini:', error);
-            return { acao: "PERMITIR", motivo: "Erro na análise", nivel_gravidade: 1 };
-        }
-    }
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: text,
+            config: {
+                systemInstruction: systemInstruction,
+                temperature: 0.1
+            }
+        });
 
-    async processarPrompt(prompt, contexto = {}) {
-        try {
-            const promptCompleto = `
-Instrução: ${prompt}
-
-Contexto:
-- Data/Hora: ${new Date().toLocaleString('pt-MZ', { timeZone: 'Africa/Maputo' })}
-- Informações: ${JSON.stringify(contexto)}
-
-Execute de forma prática:`;
-
-            const result = await this.model.generateContent(promptCompleto);
-            const response = await result.response;
-            return response.text().trim();
-        } catch (error) {
-            return `❌ Erro: ${error.message}`;
-        }
+        const resultText = response.text.trim().toUpperCase();
+        return resultText.includes('INADEQUADO');
+    } catch (error) {
+        console.error("Erro na moderação com Gemini AI:", error);
+        return false;
     }
 }
 
-module.exports = GeminiAI;
+async function gerarResposta(prompt) {
+    try {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: prompt
+        });
+        return response.text;
+    } catch (error) {
+        console.error("Erro ao gerar resposta com Gemini AI:", error);
+        return "Desculpe, a IA está indisponível no momento.";
+    }
+}
+
+module.exports = {
+    moderarConteudo,
+    gerarResposta
+};
