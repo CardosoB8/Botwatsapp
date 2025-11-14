@@ -1,12 +1,13 @@
 {
   "name": "bot-whatsapp-completo",
   "version": "1.0.0",
-  "description": "Bot WhatsApp completo com Redis e todas as funcionalidades",
+  "description": "Bot WhatsApp completo com Redis",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "vercel-build": "echo 'Build completo'"
+    "vercel-build": "npm install && npm run postinstall",
+    "postinstall": "node node_modules/puppeteer-core/install.js"
   },
   "dependencies": {
     "whatsapp-web.js": "^1.23.0",
@@ -15,7 +16,9 @@
     "express-session": "^1.17.3",
     "redis": "^4.6.7",
     "connect-redis": "^7.1.0",
-    "@google/generative-ai": "^0.8.0"
+    "@google/generative-ai": "^0.8.0",
+    "chrome-aws-lambda": "^10.1.0",
+    "puppeteer-core": "^21.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const RedisStore = require('connect-redis').default;
+const chromium = require('chrome-aws-lambda');
 const redisClient = require('./redis-client');
 const config = require('./config');
 const GeminiAI = require('./gemini-ai');
@@ -14,59 +15,71 @@ process.env.TZ = config.TIMEZONE;
 class BotCompleto {
     constructor() {
         this.app = express();
-        this.client = new Client({
-            authStrategy: new LocalAuth({
-                dataPath: "/tmp"
-            }),
-            puppeteer: {
-                headless: true,
+        this.initializeBot();
+    }
+
+    async initializeBot() {
+        try {
+            // Configuração do Puppeteer para Vercel
+            const puppeteerOptions = {
+                executablePath: await chromium.executablePath,
+                headless: chromium.headless,
                 args: [
+                    ...chromium.args,
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--single-process',
                     '--no-zygote',
                     '--disable-dev-shm-usage'
                 ]
-            }
-        });
+            };
 
-        this.gemini = new GeminiAI(config.GEMINI_API_KEY);
-        this.currentQR = null;
-        this.memory = {
-            horarios: {},
-            configuracoes: {},
-            historico: []
-        };
+            this.client = new Client({
+                authStrategy: new LocalAuth({
+                    dataPath: "/tmp"
+                }),
+                puppeteer: puppeteerOptions
+            });
 
-        this.setupWebServer();
-        this.inicializarBot();
+            this.gemini = new GeminiAI(config.GEMINI_API_KEY);
+            this.currentQR = null;
+            this.memory = {
+                horarios: {},
+                configuracoes: {},
+                historico: []
+            };
+
+            await this.setupWebServer();
+            await this.inicializarBot();
+
+        } catch (error) {
+            console.error('❌ Erro ao inicializar bot:', error);
+        }
     }
 
     async setupWebServer() {
-        // Conectar Redis com a configuração fornecida
+        // Conectar Redis
         const redisConnected = await redisClient.connect();
-        if (!redisConnected) {
-            console.log('⚠️ Usando memória volátil (Redis não conectado)');
-        }
-
-        // Configurar sessão com Redis
-        let redisStore;
-        if (redisConnected) {
-            redisStore = new RedisStore({
-                client: redisClient.client,
-                prefix: `${config.REDIS.PREFIX}session:`
-            });
-        }
-
+        
         // Middlewares
         this.app.use(express.json());
         this.app.use(express.urlencoded({ extended: true }));
         this.app.use(express.static('public'));
 
         // Configurar sessão
+        let store;
+        if (redisConnected) {
+            store = new RedisStore({
+                client: redisClient.client,
+                prefix: `${config.REDIS.PREFIX}session:`
+            });
+        } else {
+            store = new session.MemoryStore();
+        }
+
         this.app.use(session({
-            store: redisStore || new session.MemoryStore(),
-            secret: 'bot-whatsapp-secret-key',
+            store: store,
+            secret: 'bot-whatsapp-secret-key-vercel',
             resave: false,
             saveUninitialized: false,
             cookie: { 
@@ -75,7 +88,7 @@ class BotCompleto {
             }
         }));
 
-        // Rotas da Web
+        // Rotas
         this.setupRoutes();
 
         // Iniciar servidor
@@ -89,9 +102,11 @@ class BotCompleto {
 
     setupRoutes() {
         this.app.get('/', (req, res) => {
-            req.session.authenticated ? 
-                res.redirect('/dashboard') : 
+            if (req.session.authenticated) {
+                res.redirect('/dashboard');
+            } else {
                 res.redirect('/login');
+            }
         });
 
         this.app.get('/login', (req, res) => {
@@ -99,6 +114,8 @@ class BotCompleto {
         });
 
         this.app.post('/login', (req, res) => {
+            console.log('Tentativa de login:', req.body.senha, 'Esperado:', config.WEB.SENHA);
+            
             if (req.body.senha === config.WEB.SENHA) {
                 req.session.authenticated = true;
                 res.json({ success: true });
@@ -114,9 +131,12 @@ class BotCompleto {
 
         this.app.get('/qrcode', async (req, res) => {
             if (!req.session.authenticated) return res.status(403).json({ error: 'Não autorizado' });
-            this.currentQR ? 
-                res.json({ qr: this.currentQR, connected: false }) : 
+            
+            if (this.currentQR) {
+                res.json({ qr: this.currentQR, connected: false });
+            } else {
                 res.json({ connected: true });
+            }
         });
 
         this.app.get('/status', async (req, res) => {
@@ -125,17 +145,16 @@ class BotCompleto {
             const redisHealth = await redisClient.healthCheck();
             
             res.json({
-                connected: !!this.client.info,
+                connected: this.client.info ? true : false,
                 user: this.client.info?.wid?.user || 'Não conectado',
                 memorySize: Object.keys(this.memory.horarios || {}).length,
                 timezone: config.TIMEZONE,
                 currentTime: new Date().toLocaleString('pt-MZ', { timeZone: config.TIMEZONE }),
-                redis: redisHealth ? 'connected' : 'disconnected',
-                commands: Object.keys(config.COMANDOS).length
+                redis: redisHealth ? 'connected' : 'disconnected'
             });
         });
 
-        // API para gerenciar prompts
+        // API para prompts
         this.app.get('/prompts', async (req, res) => {
             if (!req.session.authenticated) return res.status(403).json({ error: 'Não autorizado' });
             res.json(this.memory.horarios || {});
@@ -154,7 +173,7 @@ class BotCompleto {
             });
 
             await this.salvarMemory();
-            res.json({ success: true, message: `✅ Prompt agendado para ${hora}` });
+            res.json({ success: true, message: `Prompt agendado para ${hora}` });
         });
 
         this.app.delete('/prompt/:hora/:index', async (req, res) => {
@@ -172,24 +191,9 @@ class BotCompleto {
                 res.status(404).json({ error: 'Prompt não encontrado' });
             }
         });
-
-        // Nova rota para status do Redis
-        this.app.get('/redis-status', async (req, res) => {
-            if (!req.session.authenticated) return res.status(403).json({ error: 'Não autorizado' });
-            
-            const health = await redisClient.healthCheck();
-            res.json({ 
-                redis: health ? 'healthy' : 'unhealthy',
-                config: {
-                    host: config.REDIS.HOST,
-                    port: config.REDIS.PORT,
-                    connected: health
-                }
-            });
-        });
     }
 
-    // 🧠 SISTEMA DE MEMÓRIA COM REDIS
+    // 🧠 SISTEMA DE MEMÓRIA
     async carregarMemory() {
         try {
             if (await redisClient.healthCheck()) {
@@ -224,13 +228,12 @@ class BotCompleto {
         await this.carregarMemory();
 
         this.client.on('qr', async (qr) => {
-            console.log('📱 QR Code gerado - Acesse a interface web');
+            console.log('📱 QR Code gerado');
             this.currentQR = await qrcode.toDataURL(qr);
         });
 
         this.client.on('ready', () => {
-            console.log('✅ Bot WhatsApp conectado e pronto!');
-            console.log(`👤 Logado como: ${this.client.info.pushname}`);
+            console.log('✅ Bot conectado!');
             this.currentQR = null;
             this.iniciarVerificacoesAgendadas();
         });
@@ -243,14 +246,10 @@ class BotCompleto {
             await this.boasVindas(notification);
         });
 
-        this.client.on('group_leave', async (notification) => {
-            await this.despedida(notification);
-        });
-
         this.client.initialize();
     }
 
-    // ⏰ SISTEMA DE AGENDAMENTOS (mantido igual)
+    // ⏰ SISTEMA DE AGENDAMENTOS
     iniciarVerificacoesAgendadas() {
         setInterval(() => {
             this.verificarPromptsAgendados();
@@ -305,13 +304,11 @@ class BotCompleto {
         try {
             const chat = await message.getChat();
             
-            // Comandos do dono
             if (this.isDono(message)) {
                 await this.processarComandoDono(message, chat);
                 return;
             }
 
-            // Comandos de admin em grupos
             if (chat.isGroup) {
                 const comando = message.body.trim().toLowerCase();
                 const isAdmin = await this.verificarSeEhAdmin(message, chat);
@@ -320,7 +317,6 @@ class BotCompleto {
                     await this.processarComandoAdmin(comando, message, chat);
                 }
                 
-                // Moderação com IA
                 await this.moderarComGemini(message, chat);
             }
 
@@ -348,58 +344,56 @@ class BotCompleto {
         }
     }
 
-    // ⚡ COMANDOS DE ADMINISTRAÇÃO COMPLETOS
+    // ⚡ COMANDOS DE ADMIN
     async processarComandoAdmin(comando, message, chat) {
         switch (comando) {
-            case config.COMANDOS.MENCIONAR_TODOS:
+            case '!mencionar':
             case '!todos':
                 await this.mencionarTodos(message, chat);
                 break;
 
-            case config.COMANDOS.MENCIONAR_ADMINS:
+            case '!admins':
                 await this.mencionarAdmins(message, chat);
                 break;
 
-            case config.COMANDOS.LIMPAR_CONVERSA:
+            case '!limpar':
                 await this.limparConversa(message, chat);
                 break;
 
-            case config.COMANDOS.BANIR_USUARIO:
+            case '!banir':
                 if (message.hasQuotedMsg) {
                     const quotedMsg = await message.getQuotedMessage();
                     await this.banirUsuario(message, chat, quotedMsg.from);
-                } else {
-                    await message.reply('❌ Responda a mensagem do usuário para banir');
                 }
                 break;
 
-            case config.COMANDOS.MUTAR_GRUPO:
+            case '!mutar':
                 await this.mutarGrupo(message, chat, true);
                 break;
 
-            case config.COMANDOS.DESMUTAR_GRUPO:
+            case '!desmutar':
                 await this.mutarGrupo(message, chat, false);
                 break;
 
-            case config.COMANDOS.INFO_GRUPO:
+            case '!info':
                 await this.infoGrupo(message, chat);
                 break;
 
-            case config.COMANDOS.PROMOVER_ADMIN:
+            case '!promover':
                 if (message.hasQuotedMsg) {
                     const quotedMsg = await message.getQuotedMessage();
                     await this.promoverAdmin(message, chat, quotedMsg.from);
                 }
                 break;
 
-            case config.COMANDOS.REBAIXAR_ADMIN:
+            case '!rebaixar':
                 if (message.hasQuotedMsg) {
                     const quotedMsg = await message.getQuotedMessage();
                     await this.rebaixarAdmin(message, chat, quotedMsg.from);
                 }
                 break;
 
-            case config.COMANDOS.COMANDOS_LISTA:
+            case '!comandos':
                 await this.mostrarComandos(message);
                 break;
 
@@ -412,7 +406,7 @@ class BotCompleto {
         }
     }
 
-    // 🎯 SISTEMA DE MENCIONAR (OTIMIZADO)
+    // 🎯 SISTEMA DE MENCIONAR
     async mencionarTodos(message, chat) {
         try {
             await this.delayAleatorio();
@@ -422,7 +416,7 @@ class BotCompleto {
             }
 
             if (chat.participants.length > config.COMPORTAMENTO.MENCIONAR_LIMITE) {
-                return await message.reply(`❌ Grupo muito grande! Máximo: ${config.COMPORTAMENTO.MENCIONAR_LIMITE} membros`);
+                return await message.reply(`❌ Grupo muito grande!`);
             }
 
             let texto = `📢 *MENÇÃO GERAL* 📢\n\n`;
@@ -441,7 +435,6 @@ class BotCompleto {
             texto += `\n📌 Por: ${message._data.notifyName}`;
 
             await chat.sendMessage(texto, { mentions });
-            console.log(`✅ Mention all: ${count} membros`);
 
         } catch (error) {
             console.error('Erro mencionar todos:', error);
@@ -512,7 +505,7 @@ class BotCompleto {
         }
     }
 
-    // 🗑️ LIMPAR CONVERSA (OTIMIZADO)
+    // 🗑️ LIMPAR CONVERSA
     async limparConversa(message, chat) {
         try {
             await this.delayAleatorio();
@@ -521,7 +514,7 @@ class BotCompleto {
                 return await message.reply('❌ Apenas administradores!');
             }
 
-            await message.reply('🔄 Limpando conversa... Isso pode levar alguns minutos.');
+            await message.reply('🔄 Limpando conversa...');
 
             let deletedCount = 0;
             const messages = await chat.fetchMessages({ limit: config.COMPORTAMENTO.LIMPAR_LIMITE });
@@ -531,7 +524,6 @@ class BotCompleto {
                     await msg.delete(true);
                     deletedCount++;
                     
-                    // Delay para evitar rate limit
                     if (deletedCount % 50 === 0) {
                         await this.delayAleatorio();
                     }
@@ -548,13 +540,13 @@ class BotCompleto {
         }
     }
 
-    // 🔨 FUNÇÕES AVANÇADAS DE ADMIN
+    // 🔨 FUNÇÕES DE ADMIN
     async banirUsuario(message, chat, usuarioId) {
         try {
             await chat.removeParticipants([usuarioId]);
             await message.reply('✅ Usuário removido do grupo!');
         } catch (error) {
-            await message.reply('❌ Erro ao remover usuário. Verifique se tenho permissão.');
+            await message.reply('❌ Erro ao remover usuário');
         }
     }
 
@@ -562,7 +554,7 @@ class BotCompleto {
         try {
             await chat.setMessagesAdminsOnly(status);
             const acao = status ? 'mutado' : 'desmutado';
-            await message.reply(`✅ Grupo ${acao} com sucesso! ${status ? 'Apenas admins podem enviar mensagens.' : 'Todos podem enviar mensagens.'}`);
+            await message.reply(`✅ Grupo ${acao} com sucesso!`);
         } catch (error) {
             await message.reply('❌ Erro ao alterar configurações do grupo');
         }
@@ -573,7 +565,7 @@ class BotCompleto {
             await chat.promoteParticipants([usuarioId]);
             await message.reply('✅ Usuário promovido a administrador!');
         } catch (error) {
-            await message.reply('❌ Erro ao promover usuário. Verifique minhas permissões.');
+            await message.reply('❌ Erro ao promover usuário');
         }
     }
 
@@ -582,7 +574,7 @@ class BotCompleto {
             await chat.demoteParticipants([usuarioId]);
             await message.reply('✅ Usuário rebaixado de administrador!');
         } catch (error) {
-            await message.reply('❌ Erro ao rebaixar usuário. Verifique minhas permissões.');
+            await message.reply('❌ Erro ao rebaixar usuário');
         }
     }
 
@@ -633,7 +625,7 @@ class BotCompleto {
         return new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    // 📋 MOSTRAR COMANDOS COMPLETOS
+    // 📋 MOSTRAR COMANDOS
     async mostrarComandos(message) {
         const comandos = `
 🤖 *COMANDOS DISPONÍVEIS*
@@ -644,7 +636,7 @@ class BotCompleto {
 • \`!mencionar [msg]\` - Marca com mensagem
 
 ⚡ *ADMINISTRAÇÃO:*
-• \`!limpar\` - Limpa a conversa (até ${config.COMPORTAMENTO.LIMPAR_LIMITE} msgs)
+• \`!limpar\` - Limpa a conversa
 • \`!banir\` - Remove usuário (responder msg)
 • \`!mutar\` - Apenas admins podem enviar msg
 • \`!desmutar\` - Todos podem enviar msg
@@ -659,14 +651,12 @@ class BotCompleto {
 
 📋 *AJUDA:*
 • \`!comandos\` - Mostra esta lista
-
-💡 *Nota:* Apenas administradores podem usar comandos de moderação.
         `.trim();
 
         await message.reply(comandos);
     }
 
-    // 🤖 MODERAÇÃO COM GEMINI (mantida)
+    // 🤖 MODERAÇÃO COM GEMINI
     async moderarComGemini(message, chat) {
         try {
             const analise = await this.gemini.analisarMensagem(
@@ -697,22 +687,16 @@ class BotCompleto {
         }
     }
 
-    // 👋 BOAS-VINDAS E DESPEDIDAS
+    // 👋 BOAS-VINDAS
     async boasVindas(notification) {
         await this.delayAleatorio();
         await notification.reply(
             `🎉 Bem-vindo(a), ${notification.contact.name}!\n` +
-            `💬 Leia as regras do grupo e divirta-se!\n` +
             `⏰ Horário: ${new Date().toLocaleString('pt-MZ', { timeZone: config.TIMEZONE })}`
         );
     }
 
-    async despedida(notification) {
-        await this.delayAleatorio();
-        await notification.reply(`👋 ${notification.contact.name} saiu do grupo.`);
-    }
-
-    // ⏰ FUNÇÕES DE PROMPT (mantidas)
+    // ⏰ FUNÇÕES DE PROMPT
     async adicionarPromptHorario(comando, message) {
         const match = comando.match(/às\s+(\d{2}:\d{2})\s+faça\s+(.+)/i);
         if (match) {

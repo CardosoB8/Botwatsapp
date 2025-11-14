@@ -6,13 +6,12 @@ class RedisClient {
         this.client = null;
         this.prefix = config.REDIS.PREFIX;
         
-        // Configuração IDÊNTICA à que você já usa
         this.redisConfig = {
             username: 'default',
-            password: process.env.REDIS_PASSWORD || config.REDIS.PASSWORD,
+            password: config.REDIS.PASSWORD,
             socket: {
-                host: process.env.REDIS_HOST || config.REDIS.HOST,
-                port: process.env.REDIS_PORT || config.REDIS.PORT,
+                host: config.REDIS.HOST,
+                port: config.REDIS.PORT,
                 tls: { 
                     rejectUnauthorized: false
                 }
@@ -70,18 +69,6 @@ class RedisClient {
         }
     }
 
-    async getAllKeys(pattern = '*') {
-        if (!this.client) return [];
-        try {
-            const fullPattern = `${this.prefix}${pattern}`;
-            return await this.client.keys(fullPattern);
-        } catch (error) {
-            console.error('Erro Redis keys:', error);
-            return [];
-        }
-    }
-
-    // Método para verificar saúde da conexão
     async healthCheck() {
         if (!this.client) return false;
         try {

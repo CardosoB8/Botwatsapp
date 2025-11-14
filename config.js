@@ -1,9 +1,9 @@
 module.exports = {
-    // DONO DO BOT
-    DONO: '258841234567@c.us',
+    // DONO DO BOT - Use variável de ambiente
+    DONO: process.env.DONO || '258853500876@c.us',
     
     // GEMINI AI CONFIG
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY || 'SUA_CHAVE_AQUI',
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY || 'AIzaSyAXYB2gIfAvlaMMqA9VJY5hqPCy67s2hPo',
     
     // CONFIGURAÇÕES WEB
     WEB: {
@@ -12,11 +12,11 @@ module.exports = {
         SESSION_TIMEOUT: 24 * 60 * 60 * 1000
     },
     
-    // REDIS CONFIG - MESMA CONFIG QUE VOCÊ USA
+    // REDIS CONFIG - Use variáveis de ambiente
     REDIS: {
-        HOST: 'redis-16345.c81.us-east-1-2.ec2.redns.redis-cloud.com',
-        PORT: 16345,
-        PASSWORD: 'UnK847ICOOWU5DS7RTGOHbauOq0PemVj',
+        HOST: process.env.REDIS_HOST || 'redis-16345.c81.us-east-1-2.ec2.redns.redis-cloud.com',
+        PORT: process.env.REDIS_PORT || 16345,
+        PASSWORD: process.env.REDIS_PASSWORD || 'UnK847ICOOWU5DS7RTGOHbauOq0PemVj',
         PREFIX: 'bot:'
     },
     

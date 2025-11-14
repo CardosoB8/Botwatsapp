@@ -4,70 +4,53 @@ class GeminiAI {
     constructor(apiKey) {
         this.genAI = new GoogleGenerativeAI(apiKey);
         this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
-        this.contexto = [];
     }
 
-    // Analisar mensagem com Gemini para moderação
-    async analisarMensagem(mensagem, contextoGrupo = '') {
+    async analisarMensagem(mensagem, contexto = '') {
         try {
             const prompt = `
-Analise esta mensagem de WhatsApp de um grupo e responda APENAS com JSON:
+Analise esta mensagem de WhatsApp para moderação:
 
 MENSAGEM: "${mensagem}"
-CONTEXTO DO GRUPO: ${contextoGrupo}
+CONTEXTO: ${contexto}
 
-Regras de moderação:
-- Conteúdo ofensivo, spam ou perigoso: REMOVER
-- Conteúdo questionável mas não grave: ADVERTIR  
-- Pergunta que precisa de resposta: RESPONDER
-- Conteúdo normal: PERMITIR
-
-Responda com este formato JSON:
+Responda APENAS com JSON:
 {
     "acao": "PERMITIR|ADVERTIR|REMOVER|RESPONDER",
     "motivo": "explicação breve",
-    "resposta_opcional": "resposta se necessário ou null",
+    "resposta_opcional": "resposta ou null",
     "nivel_gravidade": 1-10
-}
-`;
+}`;
 
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             const text = response.text();
             
-            // Extrair JSON da resposta
             const jsonMatch = text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
-            }
-            
-            return { acao: "PERMITIR", motivo: "Análise não concluída", nivel_gravidade: 1 };
-            
+            return jsonMatch ? JSON.parse(jsonMatch[0]) : 
+                { acao: "PERMITIR", motivo: "Análise falhou", nivel_gravidade: 1 };
+                
         } catch (error) {
-            console.error('Erro Gemini AI:', error);
+            console.error('Erro Gemini:', error);
             return { acao: "PERMITIR", motivo: "Erro na análise", nivel_gravidade: 1 };
         }
     }
 
-    // Processar prompt personalizado para ações agendadas
-    async processarPrompt(prompt, dadosContexto = {}) {
+    async processarPrompt(prompt, contexto = {}) {
         try {
             const promptCompleto = `
-INSTRUÇÃO: ${prompt}
+Instrução: ${prompt}
 
-CONTEXTO ATUAL:
-- Data e Hora (Moçambique): ${new Date().toLocaleString('pt-MZ', { timeZone: 'Africa/Maputo' })}
-- Informações Adicionais: ${JSON.stringify(dadosContexto)}
+Contexto:
+- Data/Hora: ${new Date().toLocaleString('pt-MZ', { timeZone: 'Africa/Maputo' })}
+- Informações: ${JSON.stringify(contexto)}
 
-Execute a instrução de forma prática e direta para um bot de WhatsApp:
-`;
+Execute de forma prática:`;
 
             const result = await this.model.generateContent(promptCompleto);
             const response = await result.response;
             return response.text().trim();
-            
         } catch (error) {
-            console.error('Erro ao processar prompt:', error);
             return `❌ Erro: ${error.message}`;
         }
     }
